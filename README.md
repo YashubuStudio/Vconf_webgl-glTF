@@ -1,43 +1,42 @@
-# glTF Viewer for Vconf
+# Vconf glTF Viewer
 
-ブラウザ上で glTF / glb ファイルを表示する React 製のアプリケーションです。`React Three Fiber` と `@react-three/drei` を利用し、簡単に 3D モデルをアップロード・表示できます。ZIP 形式の glTF パッケージ (scene.gltf + scene.bin + textures) にも対応しており、表示後はサーバーへ送信することも可能です。FBX 形式の場合は `/fbx` から ZIP 化したファイルを読み込めます。
+React を利用したシンプルな glTF/glb ビューワーです。`React Three Fiber` と `@react-three/drei` を用いており、ブラウザ上で手軽に 3D モデルを確認できます。ZIP 形式でまとめた glTF パッケージの読み込みや、表示したモデルを PHP 製 API へアップロードする機能も備えています。
 
-## 主な機能
-- `.glb` もしくは glTF 一式をまとめた `.zip` のアップロード
-- `/fbx` では `.fbx` をまとめた `.zip` の表示にも対応
-- アップロードしたモデルのブラウザ表示
-- 送信ボタンによるファイルアップロード (php/api/upload.php)
-- サーバーとの接続確認 (php/api/ping.php)
+## 機能
+- `.glb` または glTF 一式を格納した `.zip` ファイルのアップロード
+- `/fbx` パスからは `.fbx` を ZIP 化したものも表示可能
+- 読み込んだモデルをそのままブラウザで確認
+- `php/api/upload.php` へデータを送信するアップロードボタン
+- `php/api/ping.php` によるサーバー接続チェック
 
-## セットアップ
-1. リポジトリを取得後、依存パッケージをインストールします。
+## 使い方
+1. リポジトリ取得後に依存パッケージをインストールします。
    ```bash
    npm install
    ```
-2. 開発サーバーを起動します。
+2. 開発用サーバーを起動します。
    ```bash
    npm start
    ```
-   デフォルトでは [http://localhost:3000](http://localhost:3000) でアプリが起動します。
+   初期状態では [http://localhost:3000](http://localhost:3000) でアプリが動作します。
 
 ### ビルド
-本番用のビルドは以下で作成できます。
+本番用のビルドは次のコマンドで作成できます。
 ```bash
 npm run build
 ```
-`build/` ディレクトリに静的ファイルが出力されます。
+生成物は `build/` ディレクトリへ出力されます。
 
 ### テスト
 ```bash
 npm test
 ```
-`react-scripts` によるテストランナーが起動します。
+`react-scripts` のテストランナーが起動します。
 
 ## サーバーサイド
-`php/api` ディレクトリに簡易アップロード API が含まれています。PHP の実行環境があればそのまま利用できます。
-
-- `upload.php` : 受け取った `.zip` または `.glb` ファイルを `uploads/` ディレクトリに保存します。
-- `ping.php` : 接続確認用のエンドポイントです。
+`php/api` フォルダーには簡易アップロード API が含まれています。PHP を実行できる環境があればそのまま利用可能です。
+- `upload.php` : 受け取った ZIP/GLB を `uploads/` 以下に保存
+- `ping.php` : 接続確認用エンドポイント
 
 ## ライセンス
-このプロジェクトは MIT ライセンスです。
+MIT License
