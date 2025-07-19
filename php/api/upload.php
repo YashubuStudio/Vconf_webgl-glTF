@@ -75,6 +75,31 @@ foreach (['view1', 'view2', 'view3'] as $viewName) {
     }
 }
 
+// ✅ 1. フォルダ内に index.json を作成
+$files = array_values(array_filter(scandir($uploadDir), function ($f) use ($uploadDir) {
+    return $f !== '.' && $f !== '..' && is_file($uploadDir . $f);
+}));
+file_put_contents($uploadDir . 'index.json', json_encode($files));
+
+// ✅ 2. uploads/index.json にフォルダ一覧を追記（重複を避ける）
+$allFoldersPath = $uploadBase . 'index.json';
+$existingFolders = [];
+
+if (file_exists($allFoldersPath)) {
+    $json = file_get_contents($allFoldersPath);
+    $existingFolders = json_decode($json, true);
+    if (!is_array($existingFolders)) {
+        $existingFolders = [];
+    }
+}
+
+// フォルダがまだ一覧にない場合、追加
+if (!in_array($folderName, $existingFolders)) {
+    $existingFolders[] = $folderName;
+    file_put_contents($allFoldersPath, json_encode($existingFolders));
+}
+
+
 // ✅ 成功レスポンス
 echo json_encode([
     'success'      => true,
