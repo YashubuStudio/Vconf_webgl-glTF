@@ -84,20 +84,12 @@ export default function GltfZipViewerWithUpload() {
     });
 
     // Controls
-    controls.current = cameras.current.map((cam, index) => {
+    controls.current = cameras.current.map(cam => {
       const ctrl = new OrbitControls(cam, canvasEl);
       ctrl.target.copy(center);
       ctrl.enableDamping = true;
       ctrl.dampingFactor = 0.08;
       ctrl.screenSpacePanning = false;
-
-      // View2（index === 1）とView3（index === 2）だけ操作を制限
-      if (index === 1 || index === 2) {
-        ctrl.enableRotate = false; // 回転無効
-        ctrl.enablePan = false;    // 平行移動無効
-        ctrl.enableZoom = true;    // ズームは有効（必要に応じてfalseにもできる）
-      }
-
       return ctrl;
     });
 
@@ -331,18 +323,6 @@ export default function GltfZipViewerWithUpload() {
               URL.revokeObjectURL(url);
               return;
             }
-            
-            // バウンディングボックスサイズを取得
-            const box = new THREE.Box3().setFromObject(gltf.scene);
-            const size = box.getSize(new THREE.Vector3());
-            const maxDimension = Math.max(size.x, size.y, size.z);
-
-            // 2m (2単位) を超えるかチェック
-            if (maxDimension > 2) {
-              alert(`⚠️ このモデルのサイズ（最大辺: ${maxDimension.toFixed(2)}m）は 2m を超えています。`);
-              return;
-            }
-
             setScene(gltf.scene);
             setFileToUpload(originalFile);
         },
@@ -388,16 +368,6 @@ export default function GltfZipViewerWithUpload() {
             alert(errMsg);
             return;
           }
-
-          // ←ここにチェック追加
-          const box = new THREE.Box3().setFromObject(gltf.scene);
-          const size = box.getSize(new THREE.Vector3());
-          const maxDimension = Math.max(size.x, size.y, size.z);
-          if (maxDimension > 2) {
-            alert(`⚠️ このモデルのサイズ（最大辺: ${maxDimension.toFixed(2)}m）は 2m を超えています。`);
-            return;
-          }
-
           setScene(gltf.scene);
           setFileToUpload(file);
         },
