@@ -1,5 +1,5 @@
 <?php
-ob_start(); // 出力バッファ開始
+ob_start();
 
 $allowed_origin = 'https://3dobjcttest.yashubustudioetc.com';
 
@@ -21,35 +21,65 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     ob_end_flush(); exit;
 }
 
-if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-    http_response_code(400);
-    echo json_encode(['error' => 'No file uploaded or upload error']);
+// 入力値の取得
+$folderRaw     = $_POST['folder_id'] ?? '';
+$presenterId   = $_POST['presenter_id'] ?? '';
+$passcode      = $_POST['passcode'] ?? '';
+$passcode_expected = 'vconf2025test';
+
+// パスコード検証
+if ($passcode !== $passcode_expected) {
+    http_response_code(403);
+    echo json_encode(['error' => 'Invalid passcode']);
     ob_end_flush(); exit;
 }
 
-$allowedExtensions = ['zip', 'glb'];
-$originalName = $_FILES['file']['name'];
-$ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-
-if (!in_array($ext, $allowedExtensions)) {
+// フォルダ名の形式チェック
+if (!preg_match('/^\d{4}_\d{2}_\d{2}_\d{4}$/', $folderRaw)) {
     http_response_code(400);
-    echo json_encode(['error' => 'Unsupported file type']);
+    echo json_encode(['error' => 'Invalid folder_id format (expected yyyy_mm_dd_tttt)']);
     ob_end_flush(); exit;
 }
 
-$uploadDir = __DIR__ . '/uploads/';
+// 発表者番号の形式チェック（英数字のみ）
+if (!preg_match('/^[a-zA-Z0-9]+$/', $presenterId)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid presenter_id format (alphanumeric only)']);
+    ob_end_flush(); exit;
+}
+
+// ✅ presenter_id をフォルダ名に組み込む
+$folderName = $folderRaw . '_' . $presenterId;
+$uploadBase = __DIR__ . '/uploads/';
+$uploadDir = $uploadBase . $folderName . '/';
 if (!is_dir($uploadDir)) {
     mkdir($uploadDir, 0755, true);
 }
 
-$uniqueName = uniqid() . '-' . bin2hex(random_bytes(4)) . '.' . $ext;
-$savePath = $uploadDir . $uniqueName;
-
-if (move_uploaded_file($_FILES['file']['tmp_name'], $savePath)) {
-    echo json_encode(['fileName' => $uniqueName]);
-} else {
-    http_response_code(500);
-    echo json_encode(['error' => 'Failed to save file']);
+// ✅ モデルファイルを常に model.zip や model.glb 等の固定名で保存
+if (isset($_FILES['file']) && $_FILES['file']['error'] === UPLOAD_ERR_OK) {
+    $ext = strtolower(pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION));
+    if (in_array($ext, ['zip', 'glb', 'gltf'])) {
+        $modelPath = $uploadDir . 'model.' . $ext;
+        move_uploaded_file($_FILES['file']['tmp_name'], $modelPath);
+    }
 }
 
-ob_end_flush(); // バッファ終了
+// ✅ 画像3枚を保存
+$log = [];
+
+foreach (['view1', 'view2', 'view3'] as $viewName) {
+    if (isset($_FILES[$viewName]) && $_FILES[$viewName]['error'] === UPLOAD_ERR_OK) {
+        $dest = $uploadDir . $viewName . '.png';
+        move_uploaded_file($_FILES[$viewName]['tmp_name'], $dest);
+    }
+}
+
+// ✅ 成功レスポンス
+echo json_encode([
+    'success'      => true,
+    'folder_id'    => $folderName,
+    'presenter_id' => $presenterId
+]);
+
+ob_end_flush();
