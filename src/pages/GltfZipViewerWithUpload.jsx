@@ -3,6 +3,13 @@ import JSZip from "jszip";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
+import {
+  Box,
+  Button,
+  Typography,
+  TextField,
+  LinearProgress
+} from "@mui/material";
 
 export default function GltfZipViewerWithUpload() {
   const [scene, setScene] = useState(null);
@@ -415,19 +422,31 @@ export default function GltfZipViewerWithUpload() {
   };
 
   return (
-    <div style={{ padding: 16 }}>
-      <h2>Gltf Multi-View Viewer</h2>
-      <input type="file" accept=".zip,.glb,.gltf" onChange={handleFile} style={{ marginBottom: 8 }} />
-      <div style={{ margin: "16px 0", display: "flex", gap: "1rem" }}>
-        <label>
-          発表者番号：
-          <input type="text" value={presenterId} onChange={e => setPresenterId(e.target.value)} placeholder="例: A1234"/>
-        </label>
-        <label>
-          パスワード：
-          <input type="password" value={passcode} onChange={e => setPasscode(e.target.value)} placeholder="vconf2025test"/>
-        </label>
-      </div>
+    <Box sx={{ p: 2 }}>
+      <Typography variant="h5" gutterBottom>
+        Gltf Multi-View Viewer
+      </Typography>
+      <Button variant="contained" component="label" sx={{ mb: 2 }}>
+        ファイルを選択
+        <input hidden type="file" accept=".zip,.glb,.gltf" onChange={handleFile} />
+      </Button>
+      <Box sx={{ my: 2, display: "flex", gap: 2 }}>
+        <TextField
+          label="発表者番号"
+          value={presenterId}
+          onChange={e => setPresenterId(e.target.value)}
+          placeholder="例: A1234"
+          size="small"
+        />
+        <TextField
+          label="パスワード"
+          type="password"
+          value={passcode}
+          onChange={e => setPasscode(e.target.value)}
+          placeholder="vconf2025test"
+          size="small"
+        />
+      </Box>
 
       <div style={{ position: "relative", width: "100%", height: "600px", border: "1px solid #bbb" }}>
         <canvas
@@ -491,47 +510,24 @@ export default function GltfZipViewerWithUpload() {
       </div>
       {scene && fileToUpload && (
         <>
-          <button onClick={handleUpload} disabled={isUploading}>
+          <Button
+            variant="contained"
+            onClick={handleUpload}
+            disabled={isUploading}
+            sx={{ mt: 2 }}
+          >
             {isUploading ? "アップロード中..." : "このファイルを提出する"}
-          </button>
+          </Button>
           {isUploading && (
-            <div
-              style={{
-                width: "100%",
-                maxWidth: "600px",
-                background: "#eee",
-                height: "10px",
-                margin: "8px auto",
-                position: "relative",
-                overflow: "hidden",
-                borderRadius: "4px"
-              }}
-            >
-              <div
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  background: "#4caf50",
-                  animation: "progress 2s infinite linear"
-                }}
-              />
-            </div>
+            <LinearProgress sx={{ width: "100%", maxWidth: 600, my: 1, mx: "auto" }} />
           )}
           {uploadStatus && (
-            <div style={{ marginTop: 8, color: uploadStatus.startsWith("✅") ? "green" : "red" }}>
+            <Typography sx={{ mt: 1 }} color={uploadStatus.startsWith("✅") ? "green" : "error"}>
               {uploadStatus}
-            </div>
+            </Typography>
           )}
         </>
       )}
-      <style>
-        {`
-          @keyframes progress {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
-          }
-        `}
-      </style>
-    </div>
+    </Box>
   );
 }

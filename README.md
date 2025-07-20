@@ -14,6 +14,10 @@ React を利用したシンプルな glTF/glb ビューワーです。`React Thr
    ```bash
    npm install
    ```
+   もし個別に依存関係を追加する必要がある場合は、次のコマンドで一覧をまとめてインストールできます。
+   ```bash
+   npm run setup
+   ```
 2. 開発用サーバーを起動します。
    ```bash
    npm start

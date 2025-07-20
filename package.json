@@ -10,6 +10,9 @@
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^13.5.0",
     "jszip": "^3.10.1",
+    "@mui/material": "^5.15.8",
+    "@emotion/react": "^11.11.1",
+    "@emotion/styled": "^11.11.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^6.30.1",
@@ -22,7 +25,8 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "setup": "npm install @react-three/drei @react-three/fiber @testing-library/dom @testing-library/jest-dom @testing-library/react @testing-library/user-event jszip react react-dom react-router-dom react-scripts three three-stdlib web-vitals @mui/material @emotion/react @emotion/styled"
   },
   "eslintConfig": {
     "extends": [
