@@ -1,5 +1,6 @@
 // src/pages/Folder.jsx
 import React, { useEffect, useState } from "react";
+import { Box, Button, Typography } from "@mui/material";
 
 export default function Folder() {
   const [folders, setFolders] = useState([]);
@@ -33,23 +34,28 @@ export default function Folder() {
   }, [selectedFolder]);
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1>アップロードフォルダ一覧（運営確認用）</h1>
-      <div style={{ marginBottom: 20 }}>
+    <Box sx={{ p: 3 }}>
+      <Typography variant="h5" gutterBottom>
+        アップロードフォルダ一覧（運営確認用）
+      </Typography>
+      <Box sx={{ mb: 2 }}>
         {folders.map((folder, idx) => (
-          <button
+          <Button
             key={idx}
+            variant="outlined"
             onClick={() => setSelectedFolder(folder)}
-            style={{ margin: 5 }}
+            sx={{ mr: 1, mb: 1 }}
           >
             {folder}
-          </button>
+          </Button>
         ))}
-      </div>
+      </Box>
 
       {selectedFolder && (
         <>
-          <h2>📁 {selectedFolder} の中身</h2>
+          <Typography variant="h6" gutterBottom>
+            📁 {selectedFolder} の中身
+          </Typography>
           <ul>
             {files.map((file, idx) => (
               <li key={idx}>
@@ -73,6 +79,6 @@ export default function Folder() {
           </ul>
         </>
       )}
-    </div>
+    </Box>
   );
 }
