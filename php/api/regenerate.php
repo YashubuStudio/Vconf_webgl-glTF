@@ -28,11 +28,26 @@ if (!is_dir($baseDir)) {
     mkdir($baseDir, 0755, true);
 }
 
-$folders = array_values(array_filter(scandir($baseDir), function ($f) use ($baseDir) {
+// Load existing folder list if available
+$indexPath = $baseDir . 'index.json';
+$existingFolders = [];
+if (file_exists($indexPath)) {
+    $json = file_get_contents($indexPath);
+    $existingFolders = json_decode($json, true);
+    if (!is_array($existingFolders)) {
+        $existingFolders = [];
+    }
+}
+
+// Scan current directories under uploads
+$scannedFolders = array_values(array_filter(scandir($baseDir), function ($f) use ($baseDir) {
     return $f !== '.' && $f !== '..' && is_dir($baseDir . $f);
 }));
 
-foreach ($folders as $folder) {
+// Merge existing index with scanned directories and remove duplicates
+$folders = array_values(array_unique(array_merge($existingFolders, $scannedFolders)));
+
+foreach ($scannedFolders as $folder) {
     $folderDir = $baseDir . $folder . '/';
     $files = array_values(array_filter(scandir($folderDir), function ($f) use ($folderDir) {
         return $f !== '.' && $f !== '..' && is_file($folderDir . $f) && $f !== 'index.json';
@@ -40,6 +55,6 @@ foreach ($folders as $folder) {
     file_put_contents($folderDir . 'index.json', json_encode($files));
 }
 
-file_put_contents($baseDir . 'index.json', json_encode($folders));
+file_put_contents($indexPath, json_encode($folders));
 
 echo json_encode(['success' => true, 'folders' => $folders]);
