@@ -16,7 +16,7 @@
   Require all granted
 </If>
 
-<If "%{REQUEST_URI} =~ m#^/api/(?!uploads/|ping\.php$|upload\.php$)#">
+<If "%{REQUEST_URI} =~ m#^/api/(?!uploads/|ping\.php$|upload\.php$|regenerate\.php$)#">
   Require all denied
 </If>
 

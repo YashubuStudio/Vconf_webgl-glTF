@@ -1,0 +1,71 @@
+
+
+# -----------------------------------------------
+# ✅ /api/ping.php を常に許可
+# -----------------------------------------------
+<If "%{REQUEST_URI} =~ m#^/api/ping\.php$#">
+  Require all granted
+  Header set Access-Control-Allow-Origin "https://3dobjcttest.yashubustudioetc.com"
+  Header always set Access-Control-Allow-Methods "GET, OPTIONS"
+  Header always set Access-Control-Allow-Headers "Content-Type"
+  Header set Content-Type "application/json"
+</If>
+
+# -----------------------------------------------
+# ✅ /api/uploads/ 専用設定（ファイル一覧を許可）
+# -----------------------------------------------
+<If "%{REQUEST_URI} =~ m#^/api/uploads/#">
+  Options +Indexes
+  IndexOptions NameWidth=*
+  <IfModule mod_autoindex.c>
+    IndexIgnore *.php *.txt
+  </IfModule>
+</If>
+
+# -----------------------------------------------
+# ✅ /api/upload（保存用スクリプト）や /api/ の保護設定
+# → 外部からアクセスさせない、一覧も非表示
+# -----------------------------------------------
+<If "%{REQUEST_URI} =~ m#^/api/(?!uploads/|ping\.php$)#">
+  Options -Indexes
+
+  <IfModule mod_headers.c>
+    Header unset Access-Control-Allow-Origin
+    Header unset Access-Control-Allow-Methods
+    Header unset Access-Control-Allow-Headers
+
+    SetEnvIf Origin "https?://(.+\.)?3dobjcttest\.yashubustudioetc\.com$" AccessControlAllowOrigin=$0
+    Header set Access-Control-Allow-Origin "%{AccessControlAllowOrigin}e" env=AccessControlAllowOrigin
+    Header always set Access-Control-Allow-Methods "POST, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type"
+  </IfModule>
+
+  <IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTP:Origin} !^https?://(.+\.)?3dobjcttest\.yashubustudioetc\.com$ [NC]
+    RewriteRule ^.*$ - [F]
+  </IfModule>
+</If>
+
+# -----------------------------------------------
+# ✅ React Router対応: 存在しないファイルやフォルダの場合は index.html を返す
+# -----------------------------------------------
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^ index.html [QSA,L]
+</IfModule>
+
+# アップロードファイル制限を緩和
+php_value upload_max_filesize 100M
+php_value post_max_size 100M
+php_value max_execution_time 300
+php_value max_input_time 300
+
+# php -- BEGIN cPanel-generated handler, do not edit
+# “ea-php74” パッケージを既定の “PHP” プログラミング言語として設定します。
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php74 .php .php7 .phtml
+</IfModule>
+# php -- END cPanel-generated handler, do not edit
