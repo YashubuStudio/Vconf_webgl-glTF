@@ -206,83 +206,7 @@ export default function GltfZipViewerWithUpload() {
   }, [scene]);
 
   // ---------- Validation ----------
-const validateScene = async (root, gltf) => {
-  // 1. 2バイト文字（全角）禁止
-  let error = null;
-  root.traverse(obj => {
-    const targets = [obj.name];
-    if (obj.material && obj.material.name) targets.push(obj.material.name);
-    if (obj.geometry && obj.geometry.name) targets.push(obj.geometry.name);
-    targets.forEach(n => {
-      if (/[^\x20-\x7E]/.test(n) || /\u3000/.test(n)) {
-        error = "❌ ファイル名・オブジェクト名・メッシュ名等に全角文字は使えません";
-      }
-    });
-  });
-  if (error) return error;
-
-  // 2. サイズ
-  const box = new THREE.Box3().setFromObject(root);
-  const size = box.getSize(new THREE.Vector3());
-  if (size.x > 2 || size.y > 2 || size.z > 2) {
-    return `❌ モデルサイズが2mを超えています: ${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} m`;
-  }
-
-  // 3. ポリゴン数
-  let totalPoly = 0;
-  root.traverse(obj => {
-    if (obj.isMesh && obj.geometry) {
-      // getTriangleCount (BufferGeometry)
-      let count = 0;
-      if (obj.geometry.index) {
-        count = obj.geometry.index.count / 3;
-      } else if (obj.geometry.attributes.position) {
-        count = obj.geometry.attributes.position.count / 3;
-      }
-      totalPoly += count;
-    }
-  });
-  if (totalPoly > 20000) {
-    return `❌ ポリゴン数（${totalPoly}）が上限を超えています`;
-  }
-
-  // 4. アニメーション禁止
-  if (gltf.animations && gltf.animations.length > 0) {
-    return "❌ アニメーションは含められません";
-  }
-
-  // 5. テクスチャ
-  let textureCount = 0;
-  let over1k = false;
-  root.traverse(obj => {
-    if (obj.material && obj.material.map && obj.material.map.image) {
-      textureCount++;
-      const img = obj.material.map.image;
-      if ((img.width && img.width > 1024) || (img.height && img.height > 1024)) {
-        over1k = true;
-      }
-    }
-  });
-  if (textureCount > 1) return "❌ テクスチャは1枚のみです";
-  if (over1k) return "❌ テクスチャ解像度は1024x1024以下にしてください";
-
-  // 6. シェーダー警告（UniGLTF/UniUnlit判定）【警告のみ】
-  // GLB上のUnlit判定はエクスポータ依存ですが、Three.js上は「material.type === 'MeshBasicMaterial'」ならほぼUnlit
-  let nonUnlit = false;
-  root.traverse(obj => {
-    if (obj.material && obj.material.type !== "MeshBasicMaterial") {
-      nonUnlit = true;
-    }
-  });
-  if (nonUnlit) {
-    alert("⚠️ シェーダーは Unlit（UniGLTF/UniUnlit）推奨です。運営で変換される場合があります。");
-  }
-
-  // OK
-  return null;
-};
-
-  /*  const validateScene = async (root) => {
+  const validateScene = async (root) => {
     let error = null;
     root.traverse(obj => {
       if (obj.isMesh) {
@@ -292,7 +216,7 @@ const validateScene = async (root, gltf) => {
       }
     });
     return error;
-  };*/
+  };
 
   // ---------- Capture helper ----------
   const grabViews = async () => {
@@ -404,53 +328,6 @@ const validateScene = async (root, gltf) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // ★glb以外は即エラー
-    if (!/\.(glb)$/i.test(file.name)) {
-      alert("提出形式は .glb のみです");
-      return;
-    }
-
-    // ファイル名自体の全角禁止（必要ならここで判定追加も可）
-    // if (/[^\x20-\x7E]/.test(file.name) || /\u3000/.test(file.name)) {
-    //   alert("ファイル名に全角文字は使えません");
-    //   return;
-    // }
-
-    const url = URL.createObjectURL(file);
-    blobUrls.current.push(url);
-
-    // GLB読み込み
-    new GLTFLoader().load(
-      url,
-      async gltf => {
-        const errMsg = await validateScene(gltf.scene, gltf);
-        if (errMsg) {
-          alert(errMsg);
-          URL.revokeObjectURL(url);
-          return;
-        }
-        setScene(gltf.scene);
-        setFileToUpload(file);
-      },
-      undefined,
-      err => {
-        alert("GLB読み込みに失敗しました: " + err.message);
-        URL.revokeObjectURL(url);
-      }
-    );
-
-    e.target.value = "";
-  };
-
-  /*  const handleFile = async (e) => {
-    setScene(null);
-    setFileToUpload(null);
-    setUploadStatus("");
-    modelInfo.current = { center: new THREE.Vector3(), size: 1 };
-
-    const file = e.target.files?.[0];
-    if (!file) return;
-
     const loadGltfFromUrl = (url, originalFile) => {
       new GLTFLoader().load(
         url,
@@ -542,7 +419,7 @@ const validateScene = async (root, gltf) => {
       alert("対応形式: .zip(.gltf/.bin/textures) または .glb/.gltf");
     }
     e.target.value = "";
-  };*/
+  };
 
   return (
     <Box sx={{ p: 2 }}>
@@ -551,8 +428,7 @@ const validateScene = async (root, gltf) => {
       </Typography>
       <Button variant="contained" component="label" sx={{ mb: 2 }}>
         ファイルを選択
-        {/*<input hidden type="file" accept=".zip,.glb,.gltf" onChange={handleFile} />*/}
-        <input hidden type="file" accept=".glb" onChange={handleFile} />
+        <input hidden type="file" accept=".zip,.glb,.gltf" onChange={handleFile} />
       </Button>
       <Box sx={{ my: 2, display: "flex", gap: 2 }}>
         <TextField
