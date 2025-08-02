@@ -1,18 +1,26 @@
 <?php
 $allowed_origin = 'https://3dobjcttest.yashubustudioetc.com';
 
-if (isset($_SERVER['HTTP_ORIGIN'])) {
-    if ($_SERVER['HTTP_ORIGIN'] === $allowed_origin) {
-        header("Access-Control-Allow-Origin: $allowed_origin");
-        header("Access-Control-Allow-Methods: GET, OPTIONS");
-        header("Access-Control-Allow-Headers: Content-Type");
-    } else {
-        http_response_code(403);
-        echo json_encode(['error' => 'CORS policy: origin not allowed']);
-        exit;
-    }
+// Handle CORS preflight requests
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    header("Access-Control-Allow-Origin: $allowed_origin");
+    header('Access-Control-Allow-Methods: GET, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+    exit;
 }
 
+// Reject requests from disallowed origins
+if (isset($_SERVER['HTTP_ORIGIN']) && $_SERVER['HTTP_ORIGIN'] !== $allowed_origin) {
+    http_response_code(403);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'CORS policy: origin not allowed']);
+    exit;
+}
+
+// Always send CORS headers for the allowed origin
+header("Access-Control-Allow-Origin: $allowed_origin");
+header('Access-Control-Allow-Methods: GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 header('Content-Type: application/json');
 
 $baseDir = __DIR__ . '/uploads/';
@@ -27,7 +35,7 @@ $folders = array_values(array_filter(scandir($baseDir), function ($f) use ($base
 foreach ($folders as $folder) {
     $folderDir = $baseDir . $folder . '/';
     $files = array_values(array_filter(scandir($folderDir), function ($f) use ($folderDir) {
-        return $f !== '.' && $f !== '..' && is_file($folderDir . $f);
+        return $f !== '.' && $f !== '..' && is_file($folderDir . $f) && $f !== 'index.json';
     }));
     file_put_contents($folderDir . 'index.json', json_encode($files));
 }

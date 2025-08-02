@@ -23,10 +23,10 @@
 </If>
 
 # -----------------------------------------------
-# ✅ /api/upload（保存用スクリプト）や /api/ の保護設定
+# ✅ /api/ の保護設定（uploads/, ping.php, regenerate.php を除く）
 # → 外部からアクセスさせない、一覧も非表示
 # -----------------------------------------------
-<If "%{REQUEST_URI} =~ m#^/api/(?!uploads/|ping\.php$)#">
+<If "%{REQUEST_URI} =~ m#^/api/(?!uploads/|ping\.php$|regenerate\.php$)#">
   Options -Indexes
 
   <IfModule mod_headers.c>
