@@ -11,6 +11,115 @@ import {
   LinearProgress
 } from "@mui/material";
 
+// ====== ★★ すべての検証項目をリスト形式で返す関数 ★★ ======
+async function validateSceneWithDetails(root, gltf) {
+  const results = [];
+  let ok = true;
+
+  // 1. 全角文字・2バイト文字チェック
+  let badNames = [];
+  root.traverse(obj => {
+    [obj.name, obj?.material?.name, obj?.geometry?.name]
+      .filter(Boolean)
+      .forEach(n => {
+        if (/[^\x20-\x7E]/.test(n) || /\u3000/.test(n)) badNames.push(n);
+      });
+  });
+  if (badNames.length) {
+    ok = false;
+    results.push({
+      ok: false,
+      label: "ファイル名・オブジェクト名・メッシュ名等",
+      detail: `「${badNames[0].slice(0, 3)}${badNames[0].length > 3 ? "...": ""}」が検出されました`
+    });
+  } else {
+    results.push({
+      ok: true,
+      label: "ファイル名・オブジェクト名・メッシュ名等",
+      detail: "全て半角英数字です"
+    });
+  }
+
+  // 2. サイズ
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const sizeText = `x ${size.x.toFixed(2)}m, y ${size.y.toFixed(2)}m, z ${size.z.toFixed(2)}m`;
+  if (size.x > 2 || size.y > 2 || size.z > 2) {
+    ok = false;
+    results.push({ ok: false, label: "モデルサイズ", detail: `${sizeText} <2.00m` });
+  } else {
+    results.push({ ok: true, label: "モデルサイズ", detail: sizeText });
+  }
+
+  // 3. ポリゴン数
+  let totalPoly = 0;
+  root.traverse(obj => {
+    if (obj.isMesh && obj.geometry) {
+      let count = 0;
+      if (obj.geometry.index) {
+        count = obj.geometry.index.count / 3;
+      } else if (obj.geometry.attributes.position) {
+        count = obj.geometry.attributes.position.count / 3;
+      }
+      totalPoly += count;
+    }
+  });
+  if (totalPoly > 20000) {
+    ok = false;
+    results.push({ ok: false, label: "ポリゴン数", detail: `${totalPoly} <20000` });
+  } else {
+    results.push({ ok: true, label: "ポリゴン数", detail: `${totalPoly}` });
+  }
+
+  // 4. アニメーション
+  if (gltf.animations && gltf.animations.length > 0) {
+    ok = false;
+    results.push({ ok: false, label: "アニメーション", detail: "アニメーションが含まれています" });
+  } else {
+    results.push({ ok: true, label: "アニメーション", detail: "アニメーションは含まれていません" });
+  }
+
+  // 5. テクスチャ
+  let textureCount = 0, over1k = false, textureRes = [];
+  root.traverse(obj => {
+    if (obj.material && obj.material.map && obj.material.map.image) {
+      textureCount++;
+      const img = obj.material.map.image;
+      textureRes.push(`${img.width || "?"}x${img.height || "?"}`);
+      if ((img.width && img.width > 1024) || (img.height && img.height > 1024)) {
+        over1k = true;
+      }
+    }
+  });
+  if (textureCount > 1) {
+    ok = false;
+    results.push({ ok: false, label: "テクスチャ", detail: `テクスチャ枚数 ${textureCount}枚 <1枚` });
+  } else if (over1k) {
+    ok = false;
+    results.push({ ok: false, label: "テクスチャ", detail: `解像度 ${textureRes[0]||"?"} >1024x1024` });
+  } else {
+    results.push({ ok: true, label: "テクスチャ", detail: `テクスチャ枚数 ${textureCount}枚, 解像度 ${textureRes[0]||"?"}` });
+  }
+
+  // 備考（マテリアル数）
+  let materialSet = new Set();
+  root.traverse(obj => obj.material && materialSet.add(obj.material));
+  results.push({ ok: null, label: "備考", detail: `マテリアル数: ${materialSet.size}` });
+
+  // シェーダー警告
+  let nonUnlit = false;
+  root.traverse(obj => {
+    if (obj.material && obj.material.type !== "MeshBasicMaterial") {
+      nonUnlit = true;
+    }
+  });
+  if (nonUnlit) {
+    results.push({ ok: null, label: "シェーダー", detail: "Unlit系推奨（警告）" });
+  }
+
+  return { ok, results };
+}
+
 export default function GltfZipViewerWithUpload() {
   const [scene, setScene] = useState(null);
   const [fileToUpload, setFileToUpload] = useState(null);
@@ -20,6 +129,10 @@ export default function GltfZipViewerWithUpload() {
   const [presenterId, setPresenterId] = useState("");
   const [passcode, setPasscode] = useState("");
 
+  // ★★★ ここで検証結果を保持 ★★★
+  const [validationResults, setValidationResults] = useState(null);
+  const [validationOk, setValidationOk] = useState(false);
+
   const blobUrls = useRef([]);
   const canvasRef = useRef(null);
   const rendererRef = useRef(null);
@@ -28,7 +141,6 @@ export default function GltfZipViewerWithUpload() {
   const animationRef = useRef(null);
   const modelInfo = useRef({ center: new THREE.Vector3(), size: 1 });
 
-  // ---------- Cleanup on unmount ----------
   useEffect(() => {
     return () => {
       blobUrls.current.forEach(URL.revokeObjectURL);
@@ -42,20 +154,16 @@ export default function GltfZipViewerWithUpload() {
     };
   }, []);
 
-  // ---------- Scene dependent initialization ----------
   useEffect(() => {
     if (!scene || !canvasRef.current) return;
 
     const canvasEl = canvasRef.current;
-
-    // Compute bounding box
     const box = new THREE.Box3().setFromObject(scene);
     const center = new THREE.Vector3();
     box.getCenter(center);
     const size = box.getSize(new THREE.Vector3()).length() || 1;
     modelInfo.current = { center, size };
 
-    // Renderer (preserveDrawingBuffer = true for capture)
     const renderer = new THREE.WebGLRenderer({
       canvas: canvasEl,
       antialias: true,
@@ -67,7 +175,6 @@ export default function GltfZipViewerWithUpload() {
     renderer.setScissorTest(true);
     rendererRef.current = renderer;
 
-    // Lights (idempotent)
     if (!scene.getObjectByName("__autolight_ambient")) {
       const ambient = new THREE.AmbientLight(0xffffff, 0.7);
       ambient.name = "__autolight_ambient";
@@ -77,7 +184,6 @@ export default function GltfZipViewerWithUpload() {
       scene.add(ambient, direct);
     }
 
-    // Cameras
     const cameraPositions = [
       [0, size * 0.5, size * 1.5],
       [size, size * 0.3, -size],
@@ -90,30 +196,24 @@ export default function GltfZipViewerWithUpload() {
       return cam;
     });
 
-    // Controls
     controls.current = cameras.current.map((cam, index) => {
       const ctrl = new OrbitControls(cam, canvasEl);
       ctrl.target.copy(center);
       ctrl.enableDamping = true;
       ctrl.dampingFactor = 0.08;
       ctrl.screenSpacePanning = false;
-
-      // View2（index === 1）とView3（index === 2）だけ操作を制限
       if (index === 1 || index === 2) {
-        ctrl.enableRotate = false; // 回転無効
-        ctrl.enablePan = false;    // 平行移動無効
-        ctrl.enableZoom = true;    // ズームは有効（必要に応じてfalseにもできる）
+        ctrl.enableRotate = false;
+        ctrl.enablePan = false;
+        ctrl.enableZoom = true;
       }
-
       return ctrl;
     });
 
-    // ---------------- View Switching ----------------
     const getActiveView = (x, y, width, height) => {
       const w1 = width * 0.75;
       const h2 = height * 0.5;
       if (x < w1) return 0;
-      // note: y is flipped later (we pass y = height - pointerY)
       if (y >= h2) return 1;
       return 2;
     };
@@ -134,9 +234,7 @@ export default function GltfZipViewerWithUpload() {
     const onPointerMove = () => {
       controls.current.forEach((ctrl, i) => (ctrl.enabled = i === activeView));
     };
-    const onPointerUp = () => {
-      // keep last active view enabled
-    };
+    const onPointerUp = () => {};
 
     canvasEl.addEventListener("pointerdown", onPointerDown);
     canvasEl.addEventListener("pointermove", onPointerMove);
@@ -146,7 +244,6 @@ export default function GltfZipViewerWithUpload() {
     canvasEl.addEventListener("touchmove", onPointerMove, { passive: true });
     canvasEl.addEventListener("touchend", onPointerUp);
 
-    // ---------------- Animation Loop ----------------
     const animate = () => {
       const widthCss = canvasEl.clientWidth;
       const heightCss = canvasEl.clientHeight;
@@ -164,21 +261,18 @@ export default function GltfZipViewerWithUpload() {
 
       controls.current.forEach(c => c.update());
 
-      // Main
       renderer.setViewport(0, 0, w1, h1);
       renderer.setScissor(0, 0, w1, h1);
       cameras.current[0].aspect = w1 / h1;
       cameras.current[0].updateProjectionMatrix();
       renderer.render(scene, cameras.current[0]);
 
-      // Right Top
       renderer.setViewport(w1, h2, w2, h2);
       renderer.setScissor(w1, h2, w2, h2);
       cameras.current[1].aspect = w2 / h2;
       cameras.current[1].updateProjectionMatrix();
       renderer.render(scene, cameras.current[1]);
 
-      // Right Bottom
       renderer.setViewport(w1, 0, w2, h2);
       renderer.setScissor(w1, 0, w2, h2);
       cameras.current[2].aspect = w2 / h2;
@@ -189,7 +283,6 @@ export default function GltfZipViewerWithUpload() {
     };
     animate();
 
-    // Cleanup this effect
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
       controls.current.forEach(c => c && c.dispose());
@@ -205,118 +298,72 @@ export default function GltfZipViewerWithUpload() {
     };
   }, [scene]);
 
-  // ---------- Validation ----------
-const validateScene = async (root, gltf) => {
-  // 1. 2バイト文字（全角）禁止
-  let error = null;
-  root.traverse(obj => {
-    const targets = [obj.name];
-    if (obj.material && obj.material.name) targets.push(obj.material.name);
-    if (obj.geometry && obj.geometry.name) targets.push(obj.geometry.name);
-    targets.forEach(n => {
-      if (/[^\x20-\x7E]/.test(n) || /\u3000/.test(n)) {
-        error = "❌ ファイル名・オブジェクト名・メッシュ名等に全角文字は使えません";
-      }
-    });
-  });
-  if (error) return error;
+  // ========== ファイル検証部 =============
+  const handleFile = async (e) => {
+    setScene(null);
+    setFileToUpload(null);
+    setUploadStatus("");
+    setValidationResults(null);
+    setValidationOk(false);
+    modelInfo.current = { center: new THREE.Vector3(), size: 1 };
 
-  // 2. サイズ
-  const box = new THREE.Box3().setFromObject(root);
-  const size = box.getSize(new THREE.Vector3());
-  if (size.x > 2 || size.y > 2 || size.z > 2) {
-    return `❌ モデルサイズが2mを超えています: ${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} m`;
-  }
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  // 3. ポリゴン数
-  let totalPoly = 0;
-  root.traverse(obj => {
-    if (obj.isMesh && obj.geometry) {
-      // getTriangleCount (BufferGeometry)
-      let count = 0;
-      if (obj.geometry.index) {
-        count = obj.geometry.index.count / 3;
-      } else if (obj.geometry.attributes.position) {
-        count = obj.geometry.attributes.position.count / 3;
-      }
-      totalPoly += count;
+    if (!/\.(glb)$/i.test(file.name)) {
+      alert("提出形式は .glb のみです");
+      return;
     }
-  });
-  if (totalPoly > 20000) {
-    return `❌ ポリゴン数（${totalPoly}）が上限を超えています`;
-  }
 
-  // 4. アニメーション禁止
-  if (gltf.animations && gltf.animations.length > 0) {
-    return "❌ アニメーションは含められません";
-  }
+    const url = URL.createObjectURL(file);
+    blobUrls.current.push(url);
 
-  // 5. テクスチャ
-  let textureCount = 0;
-  let over1k = false;
-  root.traverse(obj => {
-    if (obj.material && obj.material.map && obj.material.map.image) {
-      textureCount++;
-      const img = obj.material.map.image;
-      if ((img.width && img.width > 1024) || (img.height && img.height > 1024)) {
-        over1k = true;
-      }
-    }
-  });
-  if (textureCount > 1) return "❌ テクスチャは1枚のみです";
-  if (over1k) return "❌ テクスチャ解像度は1024x1024以下にしてください";
+    new GLTFLoader().load(
+      url,
+      async gltf => {
+        const { ok, results } = await validateSceneWithDetails(gltf.scene, gltf);
+        setValidationResults(results);
+        setValidationOk(ok);
 
-  // 6. シェーダー警告（UniGLTF/UniUnlit判定）【警告のみ】
-  // GLB上のUnlit判定はエクスポータ依存ですが、Three.js上は「material.type === 'MeshBasicMaterial'」ならほぼUnlit
-  let nonUnlit = false;
-  root.traverse(obj => {
-    if (obj.material && obj.material.type !== "MeshBasicMaterial") {
-      nonUnlit = true;
-    }
-  });
-  if (nonUnlit) {
-    alert("⚠️ シェーダーは Unlit（UniGLTF/UniUnlit）推奨です。運営で変換される場合があります。");
-  }
-
-  // OK
-  return null;
-};
-
-  /*  const validateScene = async (root) => {
-    let error = null;
-    root.traverse(obj => {
-      if (obj.isMesh) {
-        if (/[^\x20-\x7E]/.test(obj.name) || /\u3000/.test(obj.name)) {
-          error = "オブジェクト名に2Byte文字か全角スペースが含まれています";
+        if (!ok) {
+          // エラーのみ抜き出し
+          const errMsg = results
+            .filter(x => x.ok === false)
+            .map(x => `×${x.label}: ${x.detail}`)
+            .join("\n");
+          alert("募集要項の制限に違反している物があります\n" + errMsg);
+          URL.revokeObjectURL(url);
+          return;
         }
+        setScene(gltf.scene);
+        setFileToUpload(file);
+      },
+      undefined,
+      err => {
+        alert("GLB読み込みに失敗しました: " + err.message);
+        URL.revokeObjectURL(url);
       }
-    });
-    return error;
-  };*/
+    );
 
-  // ---------- Capture helper ----------
+    e.target.value = "";
+  };
+
+  // ========== アップロード ==============
   const grabViews = async () => {
     const canvas = canvasRef.current;
     if (!canvas) throw new Error("Canvas not ready");
-    // 後続フレーム完了を待ち一番新しい描画を確実に
     await new Promise(r => requestAnimationFrame(r));
-
     const dpr = rendererRef.current.getPixelRatio();
     const width = Math.round(canvas.clientWidth * dpr);
     const height = Math.round(canvas.clientHeight * dpr);
-
     const w1 = Math.floor(width * 0.75);
     const h1 = height;
     const w2 = Math.floor(width * 0.25);
     const h2 = Math.floor(height * 0.5);
-
-    // WebGLバックバッファ全体を DataURL
     const dataUrl = canvas.toDataURL("image/png");
-    const baseImage = new Image();
+    const baseImage = new window.Image();
     baseImage.src = dataUrl;
     await new Promise(res => (baseImage.onload = res));
-
-    // crop utility (image uses top-left origin)
     const crop = (sx, sy, sw, sh) => {
       const oc = document.createElement("canvas");
       oc.width = sw;
@@ -327,29 +374,23 @@ const validateScene = async (root, gltf) => {
         oc.toBlob(b => (b ? resolve(b) : reject(new Error("Blob生成失敗"))), "image/png");
       });
     };
-
-    // WebGL の (w1,h2) は「左下基準」。画像は「左上基準」なので変換:
-    // imageY = totalHeight - (webglY + regionHeight)
-    const mainBlob = await crop(0, height - (0 + h1), w1, h1);            // (0,0)
-    const rtBlob = await crop(w1, height - (h2 + h2), w2, h2);             // (w1,h2)
-    const rbBlob = await crop(w1, height - (0 + h2), w2, h2);              // (w1,0)
-
+    const mainBlob = await crop(0, height - (0 + h1), w1, h1);
+    const rtBlob = await crop(w1, height - (h2 + h2), w2, h2);
+    const rbBlob = await crop(w1, height - (0 + h2), w2, h2);
     return { mainBlob, rtBlob, rbBlob };
   };
 
-  // ---------- Upload ----------
   const handleUpload = async () => {
     if (!fileToUpload || !scene) return;
     setIsUploading(true);
     setUploadStatus("");
 
-      // ユーザー入力から英数字以外を除外（例：_ や - を削除）
-  const normalizedPresenterId = presenterId.replace(/[^a-zA-Z0-9]/g, "");
-  if (!normalizedPresenterId) {
-    setUploadStatus("❌ 発表者番号には英数字が必要です（記号は使用不可）");
-    setIsUploading(false);
-    return;
-  }
+    const normalizedPresenterId = presenterId.replace(/[^a-zA-Z0-9]/g, "");
+    if (!normalizedPresenterId) {
+      setUploadStatus("❌ 発表者番号には英数字が必要です（記号は使用不可）");
+      setIsUploading(false);
+      return;
+    }
 
     let blobs;
     try {
@@ -360,7 +401,6 @@ const validateScene = async (root, gltf) => {
       return;
     }
 
-    // yyyy_mm_dd_tttt形式を自動生成
     const now = new Date();
     const pad = n => n.toString().padStart(2, "0");
     const autoPresenterId =
@@ -369,10 +409,10 @@ const validateScene = async (root, gltf) => {
       pad(now.getDate()) + "_" +
       pad(now.getHours()) + pad(now.getMinutes());
 
-    const formData = new FormData();
-    formData.append("folder_id", autoPresenterId);      // ←自動生成
-    formData.append("presenter_id", normalizedPresenterId);           // ←発表者番号として別名で送信する場合（下記説明参照）
-    formData.append("passcode", passcode);             // ←入力値
+    const formData = new window.FormData();
+    formData.append("folder_id", autoPresenterId);
+    formData.append("presenter_id", normalizedPresenterId);
+    formData.append("passcode", passcode);
     formData.append("file", fileToUpload);
     formData.append("view1", blobs.mainBlob, "view1.png");
     formData.append("view2", blobs.rtBlob, "view2.png");
@@ -393,265 +433,224 @@ const validateScene = async (root, gltf) => {
     }
   };
 
+  // ========== UI部 ==========
 
-  // ---------- File Input ----------
-  const handleFile = async (e) => {
-    setScene(null);
-    setFileToUpload(null);
-    setUploadStatus("");
-    modelInfo.current = { center: new THREE.Vector3(), size: 1 };
-
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // ★glb以外は即エラー
-    if (!/\.(glb)$/i.test(file.name)) {
-      alert("提出形式は .glb のみです");
-      return;
-    }
-
-    // ファイル名自体の全角禁止（必要ならここで判定追加も可）
-    // if (/[^\x20-\x7E]/.test(file.name) || /\u3000/.test(file.name)) {
-    //   alert("ファイル名に全角文字は使えません");
-    //   return;
-    // }
-
-    const url = URL.createObjectURL(file);
-    blobUrls.current.push(url);
-
-    // GLB読み込み
-    new GLTFLoader().load(
-      url,
-      async gltf => {
-        const errMsg = await validateScene(gltf.scene, gltf);
-        if (errMsg) {
-          alert(errMsg);
-          URL.revokeObjectURL(url);
-          return;
-        }
-        setScene(gltf.scene);
-        setFileToUpload(file);
-      },
-      undefined,
-      err => {
-        alert("GLB読み込みに失敗しました: " + err.message);
-        URL.revokeObjectURL(url);
-      }
-    );
-
-    e.target.value = "";
-  };
-
-  /*  const handleFile = async (e) => {
-    setScene(null);
-    setFileToUpload(null);
-    setUploadStatus("");
-    modelInfo.current = { center: new THREE.Vector3(), size: 1 };
-
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const loadGltfFromUrl = (url, originalFile) => {
-      new GLTFLoader().load(
-        url,
-        async gltf => {
-          const errMsg = await validateScene(gltf.scene);
-            if (errMsg) {
-              alert(errMsg);
-              URL.revokeObjectURL(url);
-              return;
-            }
-            
-            // バウンディングボックスサイズを取得
-            const box = new THREE.Box3().setFromObject(gltf.scene);
-            const size = box.getSize(new THREE.Vector3());
-            const maxDimension = Math.max(size.x, size.y, size.z);
-
-            // 2m (2単位) を超えるかチェック
-            if (maxDimension > 2) {
-              alert(`⚠️ このモデルのサイズ（最大辺: ${maxDimension.toFixed(2)}m）は 2m を超えています。`);
-              return;
-            }
-
-            setScene(gltf.scene);
-            setFileToUpload(originalFile);
-        },
-        undefined,
-        err => console.error("GLTF load error:", err)
-      );
-    };
-
-    if (file.name.toLowerCase().endsWith(".zip")) {
-      const arrayBuffer = await file.arrayBuffer();
-      const zip = await JSZip.loadAsync(arrayBuffer);
-      const fileMap = new Map();
-
-      await Promise.all(
-        Object.values(zip.files).map(async entry => {
-          if (entry.dir) return;
-          const blob = await entry.async("blob");
-          const url = URL.createObjectURL(blob);
-          blobUrls.current.push(url);
-            fileMap.set(entry.name.replace(/\\/g, "/"), url);
-        })
-      );
-
-      const gltfEntry = [...fileMap.keys()].find(k => k.toLowerCase().endsWith(".gltf"));
-      if (!gltfEntry) {
-        alert("ZIP 内に .gltf が見つかりません");
-        return;
-      }
-
-      const manager = new THREE.LoadingManager();
-      manager.setURLModifier(url => {
-        const clean = url.split(/[?#]/)[0];
-        const filename = clean.substring(clean.lastIndexOf("/") + 1);
-        const match = [...fileMap.keys()].find(k => k.endsWith(filename));
-        return match ? fileMap.get(match) : url;
-      });
-
-      new GLTFLoader(manager).load(
-        fileMap.get(gltfEntry),
-        async gltf => {
-          const errMsg = await validateScene(gltf.scene);
-          if (errMsg) {
-            alert(errMsg);
-            return;
-          }
-
-          // ←ここにチェック追加
-          const box = new THREE.Box3().setFromObject(gltf.scene);
-          const size = box.getSize(new THREE.Vector3());
-          const maxDimension = Math.max(size.x, size.y, size.z);
-          if (maxDimension > 2) {
-            alert(`⚠️ このモデルのサイズ（最大辺: ${maxDimension.toFixed(2)}m）は 2m を超えています。`);
-            return;
-          }
-
-          setScene(gltf.scene);
-          setFileToUpload(file);
-        },
-        undefined,
-        err => console.error("GLTF load error:", err)
-      );
-    } else if (/\.(glb|gltf)$/i.test(file.name)) {
-      const url = URL.createObjectURL(file);
-      blobUrls.current.push(url);
-      loadGltfFromUrl(url, file);
-    } else {
-      alert("対応形式: .zip(.gltf/.bin/textures) または .glb/.gltf");
-    }
-    e.target.value = "";
-  };*/
-
-  return (
-    <Box sx={{ p: 2 }}>
-      <Typography variant="h5" gutterBottom>
-        Gltf Multi-View Viewer
-      </Typography>
-      <Button variant="contained" component="label" sx={{ mb: 2 }}>
-        ファイルを選択
-        {/*<input hidden type="file" accept=".zip,.glb,.gltf" onChange={handleFile} />*/}
-        <input hidden type="file" accept=".glb" onChange={handleFile} />
-      </Button>
-      <Box sx={{ my: 2, display: "flex", gap: 2 }}>
-        <TextField
-          label="発表者番号"
-          value={presenterId}
-          onChange={e => setPresenterId(e.target.value)}
-          placeholder="例: A1234"
-          size="small"
-        />
-        <TextField
-          label="パスワード"
-          type="password"
-          value={passcode}
-          onChange={e => setPasscode(e.target.value)}
-          placeholder="vconf2025test"
-          size="small"
-        />
+return (
+  <Box sx={{ p: 1.5 }}>
+    {/* 上部：ファイル選択 + 入力 + 検証結果（2カラム） */}
+    <Box sx={{ display: "flex", gap: 3, alignItems: "flex-start" }}>
+      {/* 左：ファイル選択とテキスト入力 */}
+      <Box sx={{ flex: 1, minWidth: 300 }}>
+        <Typography variant="h5" sx={{ mb: 1 }}>
+          Gltf Multi-View Viewer
+        </Typography>
+        <Button variant="contained" component="label" sx={{ mb: 1.5 }}>
+          ファイルを選択
+          <input hidden type="file" accept=".glb" onChange={handleFile} />
+        </Button>
+        <Box sx={{ display: "flex", gap: 1.5 }}>
+          <TextField
+            label="発表者番号"
+            value={presenterId}
+            onChange={e => setPresenterId(e.target.value)}
+            placeholder="例: A1234"
+            size="small"
+            fullWidth
+          />
+          <TextField
+            label="パスワード"
+            type="password"
+            value={passcode}
+            onChange={e => setPasscode(e.target.value)}
+            placeholder="vconf2025test"
+            size="small"
+            fullWidth
+          />
+        </Box>
       </Box>
 
-      <div style={{ position: "relative", width: "100%", height: "600px", border: "1px solid #bbb" }}>
-        <canvas
-          ref={canvasRef}
+      {/* 右：検証結果（2列表示、圧縮） */}
+      {validationResults && (
+        <Box
+          sx={{
+            flex: 1,
+            minWidth: 340,
+            border: "1px solid #aaa",
+            borderRadius: 2,
+            bgcolor: "#fafafa",
+            px: 2,
+            py: 1.5,
+          }}
+        >
+          <Typography variant="subtitle1" sx={{ fontSize: "0.95em", mb: 1 }}>
+            検証結果
+          </Typography>
+          {validationResults.length > 0 && (
+            <>
+              {/* 1行目：全幅 */}
+              <Box sx={{ mb: 0.5 }}>
+                <Typography
+                  sx={{
+                    fontSize: "0.8em",
+                    lineHeight: 1.1,
+                    color: validationResults[0].ok === false ? "#b00" : "#093",
+                    fontWeight: validationResults[0].ok === false ? "bold" : "normal",
+                  }}
+                >
+                  {(validationResults[0].ok === false ? "×" : "〇") + " "}
+                  {validationResults[0].label}：{validationResults[0].detail}
+                </Typography>
+              </Box>
+
+              {/* 残り2列 */}
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  columnGap: 2,
+                  rowGap: 0.5,
+                }}
+              >
+                {validationResults.slice(1).map((item, idx) => (
+                  <Typography
+                    key={idx}
+                    sx={{
+                      fontSize: "0.8em",
+                      lineHeight: 1.1,
+                      color: item.ok === false ? "#b00" : item.ok === true ? "#093" : "#333",
+                      fontWeight: item.ok === false ? "bold" : "normal",
+                    }}
+                  >
+                    {(item.ok === false ? "×" : item.ok === true ? "〇" : "・") + " "}
+                    {item.label}：{item.detail}
+                  </Typography>
+                ))}
+              </Box>
+            </>
+          )}
+        </Box>
+      )}
+    </Box>
+
+    {/* 3Dビュー */}
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "600px",
+        border: "1px solid #bbb",
+        marginTop: 20,
+      }}
+    >
+      <canvas
+        ref={canvasRef}
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "block",
+          background: "#e0e0e0",
+          touchAction: "none",
+          cursor: "grab",
+        }}
+      />
+      {/* 分割枠 */}
+      <div
+        style={{
+          pointerEvents: "none",
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          zIndex: 10,
+        }}
+      >
+        <div
           style={{
-            width: "100%",
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: "75%",
             height: "100%",
-            display: "block",
-            background: "#e0e0e0",
-            touchAction: "none",
-            cursor: "grab"
+            border: "3px solid #888",
+            boxSizing: "border-box",
+            borderRadius: 6,
           }}
         />
         <div
           style={{
-            pointerEvents: "none",
             position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            zIndex: 10
+            left: "75%",
+            top: 0,
+            width: "25%",
+            height: "50%",
+            border: "3px solid #4c8",
+            boxSizing: "border-box",
+            borderRadius: 6,
           }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              top: 0,
-              width: "75%",
-              height: "100%",
-              border: "3px solid #888",
-              boxSizing: "border-box",
-              borderRadius: 6
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              left: "75%",
-              top: 0,
-              width: "25%",
-              height: "50%",
-              border: "3px solid #4c8",
-              boxSizing: "border-box",
-              borderRadius: 6
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              left: "75%",
-              top: "50%",
-              width: "25%",
-              height: "50%",
-              border: "3px solid #c48",
-              boxSizing: "border-box",
-              borderRadius: 6
-            }}
-          />
-        </div>
+        />
+        <div
+          style={{
+            position: "absolute",
+            left: "75%",
+            top: "50%",
+            width: "25%",
+            height: "50%",
+            border: "3px solid #c48",
+            boxSizing: "border-box",
+            borderRadius: 6,
+          }}
+        />
       </div>
-      {scene && fileToUpload && (
-        <>
-          <Button
-            variant="contained"
-            onClick={handleUpload}
-            disabled={isUploading}
-            sx={{ mt: 2 }}
-          >
-            {isUploading ? "アップロード中..." : "このファイルを提出する"}
-          </Button>
-          {isUploading && (
-            <LinearProgress sx={{ width: "100%", maxWidth: 600, my: 1, mx: "auto" }} />
-          )}
-          {uploadStatus && (
-            <Typography sx={{ mt: 1 }} color={uploadStatus.startsWith("✅") ? "green" : "error"}>
-              {uploadStatus}
-            </Typography>
-          )}
-        </>
+    </div>
+
+    {/* アップロードボタン・ステータス */}
+    <Box
+      sx={{
+        mt: 3,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Button
+        variant="contained"
+        onClick={handleUpload}
+        disabled={!scene || !fileToUpload || !validationOk || isUploading}
+        sx={{
+          maxWidth: 340,
+          width: "100%",
+          mx: "auto",
+          mb: 1.5,
+          fontSize: "1.05rem",
+          bgcolor: !validationOk ? "#bbb" : undefined,
+          color: !validationOk ? "#fff" : undefined,
+          cursor: !validationOk ? "not-allowed" : undefined,
+        }}
+      >
+        {isUploading
+          ? "アップロード中..."
+          : validationOk
+          ? "このファイルを提出する"
+          : "検証に合格するとアップロード可能"}
+      </Button>
+
+      {isUploading && (
+        <LinearProgress sx={{ width: "100%", maxWidth: 340, my: 0.5 }} />
+      )}
+
+      {uploadStatus && (
+        <Typography
+          sx={{
+            mt: 0.5,
+            fontSize: "0.9em",
+          }}
+          color={uploadStatus.startsWith("✅") ? "green" : "error"}
+        >
+          {uploadStatus}
+        </Typography>
       )}
     </Box>
-  );
+  </Box>
+);
 }
