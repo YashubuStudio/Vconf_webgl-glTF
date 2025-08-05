@@ -102,9 +102,37 @@ async function validateSceneWithDetails(root, gltf) {
   }
 
   // 備考（マテリアル数）
+  //let materialSet = new Set();
+  //root.traverse(obj => obj.material && materialSet.add(obj.material));
+  //results.push({ ok: null, label: "備考", detail: `マテリアル数: ${materialSet.size}` });
+
+  // 6. マテリアル数チェック（上限5）
   let materialSet = new Set();
-  root.traverse(obj => obj.material && materialSet.add(obj.material));
-  results.push({ ok: null, label: "備考", detail: `マテリアル数: ${materialSet.size}` });
+  root.traverse(obj => {
+    if (obj.material) {
+      // 複数マテリアルがあるMesh（Array）も対応
+      if (Array.isArray(obj.material)) {
+        obj.material.forEach(m => materialSet.add(m));
+      } else {
+        materialSet.add(obj.material);
+      }
+    }
+  });
+  const materialCount = materialSet.size;
+  if (materialCount > 5) {
+    ok = false;
+    results.push({
+      ok: false,
+      label: "マテリアル数",
+      detail: `${materialCount}個 > 上限5個`
+    });
+  } else {
+    results.push({
+      ok: true,
+      label: "マテリアル数",
+      detail: `${materialCount}個`
+    });
+  }
 
   // シェーダー警告
   let nonUnlit = false;
