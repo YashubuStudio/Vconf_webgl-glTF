@@ -1,5 +1,5 @@
 <?php
-$allowed_origin = 'https://3dobjcttest.yashubustudioetc.com';
+$allowed_origin = 'http://2025system.vconf.org';
 
 if (isset($_SERVER['HTTP_ORIGIN'])) {
     if ($_SERVER['HTTP_ORIGIN'] === $allowed_origin) {

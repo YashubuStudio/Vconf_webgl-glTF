@@ -447,7 +447,7 @@ export default function GltfZipViewerWithUpload() {
     formData.append("view3", blobs.rbBlob, "view3.png");
 
     try {
-      const res = await fetch("https://3dobjcttest.yashubustudioetc.com/api/upload.php", {
+      const res = await fetch("http://2025system.vconf.org/api/upload.php", {
         method: "POST",
         body: formData
       });
@@ -470,7 +470,7 @@ return (
       {/* 左：ファイル選択とテキスト入力 */}
       <Box sx={{ flex: 1, minWidth: 300 }}>
         <Typography variant="h5" sx={{ mb: 1 }}>
-          Gltf Multi-View Viewer
+          バーチャル学会2025 3Dデータ入稿フォーム
         </Typography>
         <Button variant="contained" component="label" sx={{ mb: 1.5 }}>
           ファイルを選択
