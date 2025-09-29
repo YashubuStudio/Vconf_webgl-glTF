@@ -1,5 +1,5 @@
 <?php
-$allowed_origin = 'http://2025system.vconf.org';
+$allowed_origin = 'https://2025system.vconf.org';
 
 // Handle CORS preflight requests
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

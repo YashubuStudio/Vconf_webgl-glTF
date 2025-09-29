@@ -1,21 +1,23 @@
 <?php
-$allowed_origin = 'http://2025system.vconf.org';
+header('Content-Type: application/json; charset=utf-8');
 
-if (isset($_SERVER['HTTP_ORIGIN'])) {
-    if ($_SERVER['HTTP_ORIGIN'] === $allowed_origin) {
-        header("Access-Control-Allow-Origin: $allowed_origin");
-        header("Access-Control-Allow-Methods: GET, OPTIONS");
-        header("Access-Control-Allow-Headers: Content-Type");
-    } else {
-        http_response_code(403);
-        echo json_encode(['error' => 'CORS policy: origin not allowed']);
-        exit;
-    }
+$allowed_origin = 'https://2025system.vconf.org';
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    header("Access-Control-Allow-Origin: $allowed_origin");
+    header('Access-Control-Allow-Methods: GET, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+    http_response_code(204);
+    exit;
 }
 
-header('Content-Type: application/json');
+if (!empty($_SERVER['HTTP_ORIGIN']) && $_SERVER['HTTP_ORIGIN'] !== $allowed_origin) {
+    http_response_code(403);
+    echo json_encode(['error'=>'CORS policy: origin not allowed']); exit;
+}
+
+header("Access-Control-Allow-Origin: $allowed_origin");
 echo json_encode([
     'status' => 'ok',
-    'time' => date('Y-m-d H:i:s'),
-    'server' => $_SERVER['SERVER_NAME']
-]);
+    'time'   => date('c'),
+    'server' => $_SERVER['SERVER_NAME'] ?? ''
+]); exit;
