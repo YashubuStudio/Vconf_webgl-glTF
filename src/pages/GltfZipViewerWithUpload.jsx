@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import JSZip from "jszip";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
@@ -10,6 +9,74 @@ import {
   TextField,
   LinearProgress
 } from "@mui/material";
+
+const MAX_MODEL_DIMENSION_METERS = 2;
+const MAX_ANIMATION_DURATION_SECONDS = 120;
+const ANIMATION_SAMPLE_FPS = 30;
+
+const formatSizeText = size =>
+  `x ${size.x.toFixed(2)}m, y ${size.y.toFixed(2)}m, z ${size.z.toFixed(2)}m`;
+
+const exceedsPedestalBounds = size =>
+  size.x > MAX_MODEL_DIMENSION_METERS ||
+  size.y > MAX_MODEL_DIMENSION_METERS ||
+  size.z > MAX_MODEL_DIMENSION_METERS;
+
+const getSceneSize = root => {
+  const box = new THREE.Box3().setFromObject(root);
+  return box.getSize(new THREE.Vector3());
+};
+
+function getLongestAnimationDuration(animations) {
+  return animations.reduce((longest, clip) => Math.max(longest, clip.duration || 0), 0);
+}
+
+function checkAnimationPedestalBounds(root, animations) {
+  let maxAnimatedSize = new THREE.Vector3();
+  let violatingClipName = "";
+  let violatingTime = 0;
+  const mixer = new THREE.AnimationMixer(root);
+
+  animations.forEach((clip, index) => {
+    const action = mixer.clipAction(clip);
+    action.reset().play();
+
+    const duration = Math.max(clip.duration || 0, 0);
+    const sampleCount = Math.max(1, Math.ceil(duration * ANIMATION_SAMPLE_FPS));
+    for (let i = 0; i <= sampleCount; i++) {
+      const time = (duration * i) / sampleCount;
+      mixer.setTime(time);
+      root.updateMatrixWorld(true);
+
+      const size = getSceneSize(root);
+      maxAnimatedSize = new THREE.Vector3(
+        Math.max(maxAnimatedSize.x, size.x),
+        Math.max(maxAnimatedSize.y, size.y),
+        Math.max(maxAnimatedSize.z, size.z)
+      );
+
+      if (!violatingClipName && exceedsPedestalBounds(size)) {
+        violatingClipName = clip.name || `Animation ${index + 1}`;
+        violatingTime = time;
+      }
+    }
+
+    action.stop();
+    mixer.uncacheAction(clip, root);
+  });
+
+  mixer.stopAllAction();
+  mixer.uncacheRoot(root);
+
+  const resetMixer = new THREE.AnimationMixer(root);
+  animations.forEach(clip => resetMixer.clipAction(clip).reset().play());
+  resetMixer.setTime(0);
+  resetMixer.stopAllAction();
+  resetMixer.uncacheRoot(root);
+  root.updateMatrixWorld(true);
+
+  return { maxAnimatedSize, violatingClipName, violatingTime };
+}
 
 // ====== ★★ すべての検証項目をリスト形式で返す関数 ★★ ======
 async function validateSceneWithDetails(root, gltf) {
@@ -41,14 +108,13 @@ async function validateSceneWithDetails(root, gltf) {
   }
 
   // 2. サイズ
-  const box = new THREE.Box3().setFromObject(root);
-  const size = box.getSize(new THREE.Vector3());
-  const sizeText = `x ${size.x.toFixed(2)}m, y ${size.y.toFixed(2)}m, z ${size.z.toFixed(2)}m`;
-  if (size.x > 2 || size.y > 2 || size.z > 2) {
+  const size = getSceneSize(root);
+  const sizeText = formatSizeText(size);
+  if (exceedsPedestalBounds(size)) {
     ok = false;
-    results.push({ ok: false, label: "モデルサイズ", detail: `${sizeText} <2.00m` });
+    results.push({ ok: false, label: "モデルサイズ", detail: `${sizeText} > 2m立方ペデスタル` });
   } else {
-    results.push({ ok: true, label: "モデルサイズ", detail: sizeText });
+    results.push({ ok: true, label: "モデルサイズ", detail: `${sizeText}（2m立方ペデスタル内）` });
   }
 
   // 3. ポリゴン数
@@ -73,8 +139,34 @@ async function validateSceneWithDetails(root, gltf) {
 
   // 4. アニメーション
   if (gltf.animations && gltf.animations.length > 0) {
-    ok = false;
-    results.push({ ok: false, label: "アニメーション", detail: "アニメーションが含まれています" });
+    const longestDuration = getLongestAnimationDuration(gltf.animations);
+
+    if (longestDuration > MAX_ANIMATION_DURATION_SECONDS) {
+      ok = false;
+      results.push({
+        ok: false,
+        label: "アニメーション",
+        detail: `${longestDuration.toFixed(2)}秒 > 2分`
+      });
+    } else {
+      const { maxAnimatedSize, violatingClipName, violatingTime } =
+        checkAnimationPedestalBounds(root, gltf.animations);
+
+      if (violatingClipName) {
+        ok = false;
+        results.push({
+          ok: false,
+          label: "アニメーション",
+          detail: `${violatingClipName} ${violatingTime.toFixed(2)}秒で2m立方ペデスタルを超過（最大 ${formatSizeText(maxAnimatedSize)}）`
+        });
+      } else {
+        results.push({
+          ok: true,
+          label: "アニメーション",
+          detail: `${longestDuration.toFixed(2)}秒（2分以内、全フレーム2m立方ペデスタル内）`
+        });
+      }
+    }
   } else {
     results.push({ ok: true, label: "アニメーション", detail: "アニメーションは含まれていません" });
   }
