@@ -17,6 +17,65 @@ const ANIMATION_SAMPLE_FPS = 30;
 const formatSizeText = size =>
   `x ${size.x.toFixed(2)}m, y ${size.y.toFixed(2)}m, z ${size.z.toFixed(2)}m`;
 
+const WEBGL_CONTEXT_OPTIONS = {
+  antialias: true,
+  alpha: false,
+  preserveDrawingBuffer: true
+};
+
+const FALLBACK_CONTEXT_ATTRIBUTES = {
+  alpha: WEBGL_CONTEXT_OPTIONS.alpha,
+  antialias: WEBGL_CONTEXT_OPTIONS.antialias,
+  depth: true,
+  desynchronized: false,
+  failIfMajorPerformanceCaveat: false,
+  powerPreference: "default",
+  premultipliedAlpha: true,
+  preserveDrawingBuffer: WEBGL_CONTEXT_OPTIONS.preserveDrawingBuffer,
+  stencil: false,
+  xrCompatible: false
+};
+
+const getFallbackShaderPrecisionFormat = precisionType => {
+  switch (precisionType) {
+    case WebGLRenderingContext.LOW_FLOAT:
+    case WebGLRenderingContext.LOW_INT:
+      return { rangeMin: 8, rangeMax: 8, precision: 0 };
+    case WebGLRenderingContext.MEDIUM_FLOAT:
+    case WebGLRenderingContext.MEDIUM_INT:
+      return { rangeMin: 14, rangeMax: 14, precision: 10 };
+    default:
+      return { rangeMin: 127, rangeMax: 127, precision: 23 };
+  }
+};
+
+const createStableWebGLContext = canvas => {
+  const gl =
+    canvas.getContext("webgl2", WEBGL_CONTEXT_OPTIONS) ||
+    canvas.getContext("webgl", WEBGL_CONTEXT_OPTIONS) ||
+    canvas.getContext("experimental-webgl", WEBGL_CONTEXT_OPTIONS);
+
+  if (!gl) return null;
+  if (gl.isContextLost?.()) return null;
+
+  const getContextAttributes = gl.getContextAttributes?.bind(gl);
+  if (getContextAttributes) {
+    gl.getContextAttributes = () => ({
+      ...FALLBACK_CONTEXT_ATTRIBUTES,
+      ...(getContextAttributes() || {})
+    });
+  }
+
+  const getShaderPrecisionFormat = gl.getShaderPrecisionFormat?.bind(gl);
+  if (getShaderPrecisionFormat) {
+    gl.getShaderPrecisionFormat = (shaderType, precisionType) =>
+      getShaderPrecisionFormat(shaderType, precisionType) ||
+      getFallbackShaderPrecisionFormat(precisionType);
+  }
+
+  return gl;
+};
+
 const exceedsPedestalBounds = size =>
   size.x > MAX_MODEL_DIMENSION_METERS ||
   size.y > MAX_MODEL_DIMENSION_METERS ||
@@ -248,6 +307,7 @@ export default function GltfZipViewerWithUpload() {
 
   const [presenterId, setPresenterId] = useState("");
   const [passcode, setPasscode] = useState("");
+  const [renderError, setRenderError] = useState("");
 
   // ★★★ ここで検証結果を保持 ★★★
   const [validationResults, setValidationResults] = useState(null);
@@ -278,18 +338,30 @@ export default function GltfZipViewerWithUpload() {
     if (!scene || !canvasRef.current) return;
 
     const canvasEl = canvasRef.current;
+    setRenderError("");
     const box = new THREE.Box3().setFromObject(scene);
     const center = new THREE.Vector3();
     box.getCenter(center);
     const size = box.getSize(new THREE.Vector3()).length() || 1;
     modelInfo.current = { center, size };
 
-    const renderer = new THREE.WebGLRenderer({
-      canvas: canvasEl,
-      antialias: true,
-      alpha: false,
-      preserveDrawingBuffer: true
-    });
+    const gl = createStableWebGLContext(canvasEl);
+    if (!gl) {
+      setRenderError("WebGLコンテキストを初期化できませんでした。ブラウザまたは端末のWebGL設定を確認してください。");
+      return;
+    }
+
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        canvas: canvasEl,
+        context: gl,
+        ...WEBGL_CONTEXT_OPTIONS
+      });
+    } catch (err) {
+      setRenderError(`WebGLレンダラーの初期化に失敗しました: ${err.message || "不明なエラー"}`);
+      return;
+    }
     renderer.setClearColor(0xe0e0e0);
     renderer.setPixelRatio(window.devicePixelRatio || 1);
     renderer.setScissorTest(true);
@@ -423,6 +495,7 @@ export default function GltfZipViewerWithUpload() {
     setScene(null);
     setFileToUpload(null);
     setUploadStatus("");
+    setRenderError("");
     setValidationResults(null);
     setValidationOk(false);
     modelInfo.current = { center: new THREE.Vector3(), size: 1 };
@@ -673,6 +746,25 @@ return (
           cursor: "grab",
         }}
       />
+      {renderError && (
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            bgcolor: "rgba(255,255,255,0.92)",
+            zIndex: 20,
+            p: 3,
+            textAlign: "center",
+          }}
+        >
+          <Typography color="error" sx={{ fontWeight: "bold" }}>
+            {renderError}
+          </Typography>
+        </Box>
+      )}
       {/* 分割枠 */}
       <div
         style={{
