@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import JSZip from "jszip";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
@@ -11,7 +10,14 @@ import {
   LinearProgress
 } from "@mui/material";
 
-// ====== ★★ すべての検証項目をリスト形式で返す関数 ★★ ======
+/* ---------------- Utility: 半角化 + trim ---------------- */
+const toHalfWidth = (str = "") =>
+  str
+    .replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)) // 全角英数記号→半角
+    .replace(/\u3000/g, " ") // 全角スペース→半角スペース
+    .trim();
+
+/* ====== ★★ すべての検証項目をリスト形式で返す関数 ★★ ====== */
 async function validateSceneWithDetails(root, gltf) {
   const results = [];
   let ok = true;
@@ -101,16 +107,10 @@ async function validateSceneWithDetails(root, gltf) {
     results.push({ ok: true, label: "テクスチャ", detail: `テクスチャ枚数 ${textureCount}枚, 解像度 ${textureRes[0]||"?"}` });
   }
 
-  // 備考（マテリアル数）
-  //let materialSet = new Set();
-  //root.traverse(obj => obj.material && materialSet.add(obj.material));
-  //results.push({ ok: null, label: "備考", detail: `マテリアル数: ${materialSet.size}` });
-
   // 6. マテリアル数チェック（上限5）
   let materialSet = new Set();
   root.traverse(obj => {
     if (obj.material) {
-      // 複数マテリアルがあるMesh（Array）も対応
       if (Array.isArray(obj.material)) {
         obj.material.forEach(m => materialSet.add(m));
       } else {
@@ -354,7 +354,6 @@ export default function GltfZipViewerWithUpload() {
         setValidationOk(ok);
 
         if (!ok) {
-          // エラーのみ抜き出し
           const errMsg = results
             .filter(x => x.ok === false)
             .map(x => `×${x.label}: ${x.detail}`)
@@ -413,9 +412,13 @@ export default function GltfZipViewerWithUpload() {
     setIsUploading(true);
     setUploadStatus("");
 
-    const normalizedPresenterId = presenterId.replace(/[^a-zA-Z0-9]/g, "");
-    if (!normalizedPresenterId) {
-      setUploadStatus("❌ 発表者番号には英数字が必要です（記号は使用不可）");
+    // --- 入力正規化（半角化 + trim）---
+    const idStr = toHalfWidth(presenterId);
+    const passStr = toHalfWidth(passcode);
+
+    // サーバ要件：IDは 1以上の半角数字のみ
+    if (!/^[1-9]\d*$/.test(idStr)) {
+      setUploadStatus("❌ 発表者番号は 1以上の半角数字のみです（例: 12）");
       setIsUploading(false);
       return;
     }
@@ -431,29 +434,40 @@ export default function GltfZipViewerWithUpload() {
 
     const now = new Date();
     const pad = n => n.toString().padStart(2, "0");
-    const autoPresenterId =
+    const folderId =
       now.getFullYear() + "_" +
       pad(now.getMonth() + 1) + "_" +
       pad(now.getDate()) + "_" +
       pad(now.getHours()) + pad(now.getMinutes());
 
     const formData = new window.FormData();
-    formData.append("folder_id", autoPresenterId);
-    formData.append("presenter_id", normalizedPresenterId);
-    formData.append("passcode", passcode);
+    formData.append("folder_id", folderId);
+    formData.append("presenter_id", idStr);     // ← 数字のみ
+    formData.append("passcode", passStr);       // ← 半角化＋trim 済み
     formData.append("file", fileToUpload);
     formData.append("view1", blobs.mainBlob, "view1.png");
-    formData.append("view2", blobs.rtBlob, "view2.png");
-    formData.append("view3", blobs.rbBlob, "view3.png");
+    formData.append("view2", blobs.rtBlob,   "view2.png");
+    formData.append("view3", blobs.rbBlob,   "view3.png");
 
     try {
-      const res = await fetch("http://2025system.vconf.org/api/upload.php", {
+      const res = await fetch("https://2025system.vconf.org/api/upload.php", {
         method: "POST",
         body: formData
+        // Content-Type は FormData に任せる（自分で付けない）
       });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "サーバーエラー");
-      setUploadStatus(`✅ アップロード完了: ${result.presenter_id || "送信成功"}`);
+
+      // 失敗時も本文を読んでエラーメッセージを拾う
+      const text = await res.text();
+      let payload = null;
+      try { payload = JSON.parse(text); } catch { /* テキストのまま */ }
+
+      if (!res.ok) {
+        const msg = payload?.error || text || "サーバーエラー";
+        throw new Error(msg);
+      }
+
+      const result = payload || {};
+      setUploadStatus(`✅ アップロード完了: ID=${result.presenter_id ?? idStr}`);
     } catch (err) {
       setUploadStatus("❌ アップロード失敗: " + (err.message || "不明なエラー"));
     } finally {
@@ -462,223 +476,223 @@ export default function GltfZipViewerWithUpload() {
   };
 
   // ========== UI部 ==========
-
-return (
-  <Box sx={{ p: 1.5 }}>
-    {/* 上部：ファイル選択 + 入力 + 検証結果（2カラム） */}
-    <Box sx={{ display: "flex", gap: 3, alignItems: "flex-start" }}>
-      {/* 左：ファイル選択とテキスト入力 */}
-      <Box sx={{ flex: 1, minWidth: 300 }}>
-        <Typography variant="h5" sx={{ mb: 1 }}>
-          バーチャル学会2025 3Dデータ入稿フォーム
-        </Typography>
-        <Button variant="contained" component="label" sx={{ mb: 1.5 }}>
-          ファイルを選択
-          <input hidden type="file" accept=".glb" onChange={handleFile} />
-        </Button>
-        <Box sx={{ display: "flex", gap: 1.5 }}>
-          <TextField
-            label="発表者番号"
-            value={presenterId}
-            onChange={e => setPresenterId(e.target.value)}
-            placeholder="例: A1234"
-            size="small"
-            fullWidth
-          />
-          <TextField
-            label="パスワード"
-            type="password"
-            value={passcode}
-            onChange={e => setPasscode(e.target.value)}
-            placeholder="vconf2025test"
-            size="small"
-            fullWidth
-          />
-        </Box>
-      </Box>
-
-      {/* 右：検証結果（2列表示、圧縮） */}
-      {validationResults && (
-        <Box
-          sx={{
-            flex: 1,
-            minWidth: 340,
-            border: "1px solid #aaa",
-            borderRadius: 2,
-            bgcolor: "#fafafa",
-            px: 2,
-            py: 1.5,
-          }}
-        >
-          <Typography variant="subtitle1" sx={{ fontSize: "0.95em", mb: 1 }}>
-            検証結果
+  return (
+    <Box sx={{ p: 1.5 }}>
+      {/* 上部：ファイル選択 + 入力 + 検証結果（2カラム） */}
+      <Box sx={{ display: "flex", gap: 3, alignItems: "flex-start" }}>
+        {/* 左：ファイル選択とテキスト入力 */}
+        <Box sx={{ flex: 1, minWidth: 300 }}>
+          <Typography variant="h5" sx={{ mb: 1 }}>
+            バーチャル学会2025 3Dデータ入稿フォーム
           </Typography>
-          {validationResults.length > 0 && (
-            <>
-              {/* 1行目：全幅 */}
-              <Box sx={{ mb: 0.5 }}>
-                <Typography
-                  sx={{
-                    fontSize: "0.8em",
-                    lineHeight: 1.1,
-                    color: validationResults[0].ok === false ? "#b00" : "#093",
-                    fontWeight: validationResults[0].ok === false ? "bold" : "normal",
-                  }}
-                >
-                  {(validationResults[0].ok === false ? "×" : "〇") + " "}
-                  {validationResults[0].label}：{validationResults[0].detail}
-                </Typography>
-              </Box>
+          <Button variant="contained" component="label" sx={{ mb: 1.5 }}>
+            ファイルを選択
+            <input hidden type="file" accept=".glb" onChange={handleFile} />
+          </Button>
+          <Box sx={{ display: "flex", gap: 1.5 }}>
+            <TextField
+              label="発表者番号（ID・半角数字のみ）"
+              value={presenterId}
+              onChange={e => setPresenterId(e.target.value)}
+              placeholder="例: 12"
+              size="small"
+              fullWidth
+              inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
+            />
+            <TextField
+              label="パスワード"
+              type="password"
+              value={passcode}
+              onChange={e => setPasscode(e.target.value)}
+              placeholder="例: abcd"
+              size="small"
+              fullWidth
+            />
+          </Box>
+        </Box>
 
-              {/* 残り2列 */}
-              <Box
-                sx={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  columnGap: 2,
-                  rowGap: 0.5,
-                }}
-              >
-                {validationResults.slice(1).map((item, idx) => (
+        {/* 右：検証結果（2列表示、圧縮） */}
+        {validationResults && (
+          <Box
+            sx={{
+              flex: 1,
+              minWidth: 340,
+              border: "1px solid #aaa",
+              borderRadius: 2,
+              bgcolor: "#fafafa",
+              px: 2,
+              py: 1.5,
+            }}
+          >
+            <Typography variant="subtitle1" sx={{ fontSize: "0.95em", mb: 1 }}>
+              検証結果
+            </Typography>
+            {validationResults.length > 0 && (
+              <>
+                {/* 1行目：全幅 */}
+                <Box sx={{ mb: 0.5 }}>
                   <Typography
-                    key={idx}
                     sx={{
                       fontSize: "0.8em",
                       lineHeight: 1.1,
-                      color: item.ok === false ? "#b00" : item.ok === true ? "#093" : "#333",
-                      fontWeight: item.ok === false ? "bold" : "normal",
+                      color: validationResults[0].ok === false ? "#b00" : "#093",
+                      fontWeight: validationResults[0].ok === false ? "bold" : "normal",
                     }}
                   >
-                    {(item.ok === false ? "×" : item.ok === true ? "〇" : "・") + " "}
-                    {item.label}：{item.detail}
+                    {(validationResults[0].ok === false ? "×" : "〇") + " "}
+                    {validationResults[0].label}：{validationResults[0].detail}
                   </Typography>
-                ))}
-              </Box>
-            </>
-          )}
-        </Box>
-      )}
-    </Box>
+                </Box>
 
-    {/* 3Dビュー */}
-    <div
-      style={{
-        position: "relative",
-        width: "100%",
-        height: "600px",
-        border: "1px solid #bbb",
-        marginTop: 20,
-      }}
-    >
-      <canvas
-        ref={canvasRef}
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "block",
-          background: "#e0e0e0",
-          touchAction: "none",
-          cursor: "grab",
-        }}
-      />
-      {/* 分割枠 */}
+                {/* 残り2列 */}
+                <Box
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    columnGap: 2,
+                    rowGap: 0.5,
+                  }}
+                >
+                  {validationResults.slice(1).map((item, idx) => (
+                    <Typography
+                      key={idx}
+                      sx={{
+                        fontSize: "0.8em",
+                        lineHeight: 1.1,
+                        color: item.ok === false ? "#b00" : item.ok === true ? "#093" : "#333",
+                        fontWeight: item.ok === false ? "bold" : "normal",
+                      }}
+                    >
+                      {(item.ok === false ? "×" : item.ok === true ? "〇" : "・") + " "}
+                      {item.label}：{item.detail}
+                    </Typography>
+                  ))}
+                </Box>
+              </>
+            )}
+          </Box>
+        )}
+      </Box>
+
+      {/* 3Dビュー */}
       <div
         style={{
-          pointerEvents: "none",
-          position: "absolute",
-          inset: 0,
+          position: "relative",
           width: "100%",
-          height: "100%",
-          zIndex: 10,
+          height: "600px",
+          border: "1px solid #bbb",
+          marginTop: 20,
         }}
       >
-        <div
+        <canvas
+          ref={canvasRef}
           style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            width: "75%",
+            width: "100%",
             height: "100%",
-            border: "3px solid #888",
-            boxSizing: "border-box",
-            borderRadius: 6,
+            display: "block",
+            background: "#e0e0e0",
+            touchAction: "none",
+            cursor: "grab",
           }}
         />
+        {/* 分割枠 */}
         <div
           style={{
+            pointerEvents: "none",
             position: "absolute",
-            left: "75%",
-            top: 0,
-            width: "25%",
-            height: "50%",
-            border: "3px solid #4c8",
-            boxSizing: "border-box",
-            borderRadius: 6,
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            zIndex: 10,
           }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            left: "75%",
-            top: "50%",
-            width: "25%",
-            height: "50%",
-            border: "3px solid #c48",
-            boxSizing: "border-box",
-            borderRadius: 6,
-          }}
-        />
+        >
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              width: "75%",
+              height: "100%",
+              border: "3px solid #888",
+              boxSizing: "border-box",
+              borderRadius: 6,
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: "75%",
+              top: 0,
+              width: "25%",
+              height: "50%",
+              border: "3px solid #4c8",
+              boxSizing: "border-box",
+              borderRadius: 6,
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: "75%",
+              top: "50%",
+              width: "25%",
+              height: "50%",
+              border: "3px solid #c48",
+              boxSizing: "border-box",
+              borderRadius: 6,
+            }}
+          />
+        </div>
       </div>
-    </div>
 
-    {/* アップロードボタン・ステータス */}
-    <Box
-      sx={{
-        mt: 3,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <Button
-        variant="contained"
-        onClick={handleUpload}
-        disabled={!scene || !fileToUpload || !validationOk || isUploading}
+      {/* アップロードボタン・ステータス */}
+      <Box
         sx={{
-          maxWidth: 340,
-          width: "100%",
-          mx: "auto",
-          mb: 1.5,
-          fontSize: "1.05rem",
-          bgcolor: !validationOk ? "#bbb" : undefined,
-          color: !validationOk ? "#fff" : undefined,
-          cursor: !validationOk ? "not-allowed" : undefined,
+          mt: 3,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
         }}
       >
-        {isUploading
-          ? "アップロード中..."
-          : validationOk
-          ? "このファイルを提出する"
-          : "検証に合格するとアップロード可能"}
-      </Button>
-
-      {isUploading && (
-        <LinearProgress sx={{ width: "100%", maxWidth: 340, my: 0.5 }} />
-      )}
-
-      {uploadStatus && (
-        <Typography
+        <Button
+          variant="contained"
+          onClick={handleUpload}
+          disabled={!scene || !fileToUpload || !validationOk || isUploading}
           sx={{
-            mt: 0.5,
-            fontSize: "0.9em",
+            maxWidth: 340,
+            width: "100%",
+            mx: "auto",
+            mb: 1.5,
+            fontSize: "1.05rem",
+            bgcolor: !validationOk ? "#bbb" : undefined,
+            color: !validationOk ? "#fff" : undefined,
+            cursor: !validationOk ? "not-allowed" : undefined,
           }}
-          color={uploadStatus.startsWith("✅") ? "green" : "error"}
         >
-          {uploadStatus}
-        </Typography>
-      )}
+          {isUploading
+            ? "アップロード中..."
+            : validationOk
+            ? "このファイルを提出する"
+            : "検証に合格するとアップロード可能"}
+        </Button>
+
+        {isUploading && (
+          <LinearProgress sx={{ width: "100%", maxWidth: 340, my: 0.5 }} />
+        )}
+
+        {uploadStatus && (
+          <Typography
+            sx={{
+              mt: 0.5,
+              fontSize: "0.9em",
+            }}
+            color={uploadStatus.startsWith("✅") ? "green" : "error"}
+          >
+            {uploadStatus}
+          </Typography>
+        )}
+      </Box>
     </Box>
-  </Box>
-);
+  );
 }

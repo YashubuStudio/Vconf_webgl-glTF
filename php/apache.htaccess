@@ -1,0 +1,116 @@
+# -----------------------------------------------
+# ✅ 共通: プリフライト(OPTIONS)は常に204で返す + CORS
+# -----------------------------------------------
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # /api/配下のすべてのOPTIONSに対して即時応答
+  RewriteCond %{REQUEST_METHOD} =OPTIONS
+  RewriteRule ^ - [R=204,L]
+</IfModule>
+
+# -----------------------------------------------
+# ✅ /api/ping(.php) を常に許可（HTTPS想定）
+# -----------------------------------------------
+<If "%{REQUEST_URI} =~ m#^/api/ping(?:\.php)?$#">
+  Require all granted
+  Header always set Access-Control-Allow-Origin "https://2025system.vconf.org"
+  Header always set Access-Control-Allow-Methods "GET, OPTIONS"
+  Header always set Access-Control-Allow-Headers "Content-Type"
+  Header set Content-Type "application/json; charset=utf-8"
+</If>
+
+# -----------------------------------------------
+# ✅ /api/(upload|regenerate).php を許可（POST想定）
+# -----------------------------------------------
+<If "%{REQUEST_URI} =~ m#^/api/(upload|regenerate)(?:\.php)?$#">
+  Require all granted
+  Header always set Access-Control-Allow-Origin "https://2025system.vconf.org"
+  Header always set Access-Control-Allow-Methods "POST, OPTIONS"
+  Header always set Access-Control-Allow-Headers "Content-Type"
+  Header set Content-Type "application/json; charset=utf-8"
+</If>
+
+# -----------------------------------------------
+# ✅ /api/uploads/ （静的ファイル・一覧を許可 + CORS）
+# -----------------------------------------------
+<If "%{REQUEST_URI} =~ m#^/api/uploads/#">
+  Require all granted
+  Options +Indexes
+  IndexOptions NameWidth=*
+  <IfModule mod_autoindex.c>
+    IndexIgnore *.php *.txt
+  </IfModule>
+  Header always set Access-Control-Allow-Origin "https://2025system.vconf.org"
+  Header always set Access-Control-Allow-Methods "GET, OPTIONS"
+  Header always set Access-Control-Allow-Headers "Content-Type"
+</If>
+
+# -----------------------------------------------
+# ✅ /api/ のその他は非公開（403）
+# -----------------------------------------------
+<If "%{REQUEST_URI} =~ m#^/api/(?!uploads/|ping(?:\.php)?$|upload(?:\.php)?$|regenerate(?:\.php)?$)#">
+  Require all denied
+  # 403のときもCORSを付けたい場合（フロントの扱いが楽）
+  Header always set Access-Control-Allow-Origin "https://2025system.vconf.org"
+  Header always set Access-Control-Allow-Methods "GET, POST, OPTIONS"
+  Header always set Access-Control-Allow-Headers "Content-Type"
+</If>
+
+# -----------------------------------------------
+# 🚫 React Router の index.html フォールバックは
+# 🚫 /api/ では使わない（ルート側 .htaccess にのみ置く）
+# -----------------------------------------------
+
+
+# ---- 実行ファイルの実行を完全禁止（安全対策） ----
+# PHP/CGI/シェルなどは配信も実行もさせない
+<FilesMatch "\.(php[0-9]?|phtml|phar|pl|cgi|sh|py|rb|jsp|asp|aspx)$">
+  Require all denied
+</FilesMatch>
+# 念のためハンドラも外す
+<IfModule mod_mime.c>
+  RemoveHandler .php .php7 .phtml .phar .pl .cgi .sh .py .rb .jsp .asp .aspx
+  RemoveType .php .php7 .phtml .phar .pl .cgi .sh .py .rb .jsp .asp .aspx
+</IfModule>
+
+# ---- 隠しファイル/環境ファイルは不可視 ----
+<FilesMatch "^(\.|.*\.(env|ini|config|bak|swp|git|hg))$">
+  Require all denied
+</FilesMatch>
+
+# ---- CORS（https オリジン許可）、プリフライト204 ----
+<IfModule mod_headers.c>
+  Header always set Access-Control-Allow-Origin "https://2025system.vconf.org"
+  Header always set Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+  Header always set Access-Control-Allow-Headers "Content-Type"
+  Header always set X-Content-Type-Options "nosniff"
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # プリフライトは即204
+  RewriteCond %{REQUEST_METHOD} =OPTIONS
+  RewriteRule ^ - [R=204,L]
+</IfModule>
+
+# ---- ディレクトリインデックスを表示（必要に応じてON/OFF）----
+Options +Indexes
+IndexOptions NameWidth=* FancyIndexing SuppressHTMLPreamble
+<IfModule mod_autoindex.c>
+  # 危険/不要な拡張子は一覧から除外
+  IndexIgnore *.php *.phtml *.phar *.pl *.cgi *.sh *.py *.rb *.jsp *.asp *.aspx .* *.txt
+</IfModule>
+
+# ---- キャッシュ（任意・配信効率化）----
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType image/png "access plus 30 days"
+  ExpiresByType model/gltf-binary "access plus 30 days"   # .glb
+  ExpiresByType model/gltf+json  "access plus 30 days"    # .gltf
+  ExpiresByType application/zip  "access plus 30 days"    # .zip
+</IfModule>
+<IfModule mod_headers.c>
+  <FilesMatch "\.(png|glb|gltf|zip)$">
+    Header always set Cache-Control "public, max-age=2592000, immutable"
+  </FilesMatch>
+</IfModule>
