@@ -23,6 +23,19 @@ const WEBGL_CONTEXT_OPTIONS = {
   preserveDrawingBuffer: true
 };
 
+const FALLBACK_CONTEXT_ATTRIBUTES = {
+  alpha: WEBGL_CONTEXT_OPTIONS.alpha,
+  antialias: WEBGL_CONTEXT_OPTIONS.antialias,
+  depth: true,
+  desynchronized: false,
+  failIfMajorPerformanceCaveat: false,
+  powerPreference: "default",
+  premultipliedAlpha: true,
+  preserveDrawingBuffer: WEBGL_CONTEXT_OPTIONS.preserveDrawingBuffer,
+  stencil: false,
+  xrCompatible: false
+};
+
 const getFallbackShaderPrecisionFormat = precisionType => {
   switch (precisionType) {
     case WebGLRenderingContext.LOW_FLOAT:
@@ -43,6 +56,15 @@ const createStableWebGLContext = canvas => {
     canvas.getContext("experimental-webgl", WEBGL_CONTEXT_OPTIONS);
 
   if (!gl) return null;
+  if (gl.isContextLost?.()) return null;
+
+  const getContextAttributes = gl.getContextAttributes?.bind(gl);
+  if (getContextAttributes) {
+    gl.getContextAttributes = () => ({
+      ...FALLBACK_CONTEXT_ATTRIBUTES,
+      ...(getContextAttributes() || {})
+    });
+  }
 
   const getShaderPrecisionFormat = gl.getShaderPrecisionFormat?.bind(gl);
   if (getShaderPrecisionFormat) {
